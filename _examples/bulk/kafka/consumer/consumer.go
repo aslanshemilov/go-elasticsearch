@@ -53,13 +53,13 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 	}
 
 	c.reader = kafka.NewReader(kafka.ReaderConfig{
-		Brokers:         []string{c.BrokerURL},
-		GroupID:         "go-elasticsearch-demo",
-		Topic:           c.TopicName,
-		MinBytes:        5e+5,
-		MaxBytes:        5e+6,
-		MaxWait:         time.Second,
-		ReadLagInterval: 500 * time.Millisecond,
+		Brokers: []string{c.BrokerURL},
+		GroupID: "go-elasticsearch-demo",
+		Topic:   c.TopicName,
+		// MinBytes: 1e+6, // 1MB
+		// MaxBytes: 5e+6, // 5MB
+
+		ReadLagInterval: 1 * time.Second,
 	})
 
 	for {
@@ -88,7 +88,6 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 			return fmt.Errorf("indexer: %s", err)
 		}
 	}
-
 	c.reader.Close()
 	c.indexer.Close(context.Background())
 
@@ -106,11 +105,11 @@ func (c *Consumer) Report() {
 	c.totalErrors += readerStats.Errors
 
 	fmt.Printf(
-		"[Consumer]   lagging=%-*s  |   received=%-*s |   errors=%-*s |   added=%-*s |   flushed=%-*s |   failed=%s",
+		"lagging=%-*s  |   received=%-*s |   errors=%-*s  |   added=%-*s |   flushed=%-*s |   failed=%-*s",
 		10, humanize.Comma(readerStats.Lag),
 		10, humanize.Comma(c.totalMessages),
 		10, humanize.Comma(c.totalErrors),
 		10, humanize.Comma(int64(indexerStats.NumAdded)),
 		10, humanize.Comma(int64(indexerStats.NumFlushed)),
-		humanize.Comma(int64(indexerStats.NumFailed)))
+		0, humanize.Comma(int64(indexerStats.NumFailed)))
 }

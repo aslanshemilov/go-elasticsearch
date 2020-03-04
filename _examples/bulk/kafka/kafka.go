@@ -8,14 +8,18 @@ package main
 
 import (
 	"context"
+	"expvar"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"time"
+
+	_ "net/http/pprof"
 
 	"github.com/dustin/go-humanize"
 
@@ -53,6 +57,8 @@ func init() {
 func main() {
 	log.SetFlags(0)
 
+	go func() { log.Println(http.ListenAndServe("localhost:6060", nil)) }()
+
 	var (
 		wg  sync.WaitGroup
 		ctx = context.Background()
@@ -77,10 +83,12 @@ func main() {
 		RetryOnStatus: []int{502, 503, 504, 429}, // Add 429 to the list of retryable statuses
 		RetryBackoff:  func(i int) time.Duration { return time.Duration(i) * 100 * time.Millisecond },
 		MaxRetries:    5,
+		EnableMetrics: true,
 	})
 	if err != nil {
 		log.Fatalf("Error: NewClient(): %s", err)
 	}
+	expvar.Publish("go-elasticsearch", expvar.Func(func() interface{} { m, _ := es.Metrics(); return m }))
 
 	idx, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
 		Index:      indexName,

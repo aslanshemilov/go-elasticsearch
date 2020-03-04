@@ -37,6 +37,7 @@ var (
 	numConsumers = 4
 	flushBytes   = 0 // Default
 	numWorkers   = 0 // Default
+	indexerError error
 )
 
 func init() {
@@ -86,6 +87,7 @@ func main() {
 		Client:     es,
 		NumWorkers: numWorkers,
 		FlushBytes: int(flushBytes),
+		OnError:    func(err error) { indexerError = err },
 	})
 	if err != nil {
 		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
@@ -100,14 +102,25 @@ func main() {
 				Indexer:   indexers[0]})
 	}
 
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	reporter := time.NewTicker(500 * time.Millisecond)
+	defer reporter.Stop()
 	go func() {
 		fmt.Println("Initializing...")
 		for {
 			select {
-			case <-ticker.C:
+			case <-reporter.C:
 				fmt.Print(report(producers, consumers, indexers))
+			}
+		}
+	}()
+
+	errcleaner := time.NewTicker(10 * time.Second)
+	defer errcleaner.Stop()
+	go func() {
+		for {
+			select {
+			case <-errcleaner.C:
+				indexerError = nil
 			}
 		}
 	}()
@@ -155,11 +168,15 @@ func report(
 		numCols  = 6
 		colWidth = 20
 
-		divider = func() {
+		divider = func(last bool) {
 			fmt.Fprintf(&b, "\033[%d;0H", currRow)
 			fmt.Fprint(&b, "┣")
 			for i := 1; i <= numCols; i++ {
 				fmt.Fprint(&b, strings.Repeat("━", colWidth))
+				if last && i == 5 {
+					fmt.Fprint(&b, "┷")
+					continue
+				}
 				if i < numCols {
 					fmt.Fprint(&b, "┿")
 				}
@@ -200,7 +217,7 @@ func report(
 		currRow++
 	}
 
-	divider()
+	divider(false)
 
 	for i, c := range consumers {
 		fmt.Fprintf(&b, "\033[%d;0H", currRow)
@@ -218,7 +235,7 @@ func report(
 		value = fmt.Sprintf("errors=%s", humanize.Comma(s.TotalErrors))
 		fmt.Fprintf(&b, " %-*s┃", colWidth-1, value)
 		currRow++
-		divider()
+		divider(i == len(consumers)-1)
 	}
 
 	for i, x := range indexers {
@@ -232,11 +249,18 @@ func report(
 		fmt.Fprintf(&b, " %-*s│", colWidth-1, value)
 		value = fmt.Sprintf("failed=%s", humanize.Comma(int64(s.NumFailed)))
 		fmt.Fprintf(&b, " %-*s│", colWidth-1, value)
-		fmt.Fprintf(&b, " %-*s│", colWidth-1, "")
-		fmt.Fprintf(&b, " %-*s┃", colWidth-1, "")
+		if indexerError != nil {
+			value = "err=" + indexerError.Error()
+			if len(value) > 2*colWidth {
+				value = value[:2*colWidth]
+			}
+		} else {
+			value = ""
+		}
+		fmt.Fprintf(&b, " %-*s┃", 2*colWidth, value)
 		currRow++
 		if i < len(indexers)-1 {
-			divider()
+			divider(true)
 		}
 	}
 
@@ -244,6 +268,10 @@ func report(
 	fmt.Fprint(&b, "┗")
 	for i := 1; i <= numCols; i++ {
 		fmt.Fprint(&b, strings.Repeat("━", colWidth))
+		if i == 5 {
+			fmt.Fprint(&b, "━")
+			continue
+		}
 		if i < numCols {
 			fmt.Fprint(&b, "┷")
 		}

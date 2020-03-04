@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -30,7 +31,7 @@ var (
 
 	topicName  = "stocks"
 	topicParts = 4
-	msgRate    = 100 // Messages per second
+	msgRate    int
 
 	indexName    = "stocks"
 	numConsumers = 4
@@ -44,6 +45,8 @@ func init() {
 	} else {
 		brokerURL = "localhost:9092"
 	}
+	flag.IntVar(&msgRate, "rate", 1000, "Producer rate (msg/sec)")
+	flag.Parse()
 }
 
 func main() {

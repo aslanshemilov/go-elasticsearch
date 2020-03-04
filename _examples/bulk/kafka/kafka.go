@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/esutil"
+
 	"github.com/elastic/go-elasticsearch/v8/_examples/bulk/kafka/consumer"
 	"github.com/elastic/go-elasticsearch/v8/_examples/bulk/kafka/producer"
 )
@@ -27,8 +30,9 @@ var (
 	msgRate    = 100 // Messages per second
 
 	indexName    = "stocks"
-	flushBytes   = 0
 	numConsumers = 4
+	flushBytes   = 0 // Default
+	numWorkers   = 0 // Default
 )
 
 func init() {
@@ -61,13 +65,31 @@ func main() {
 			TopicParts:  topicParts,
 			MessageRate: msgRate})
 
+	es, err := elasticsearch.NewClient(elasticsearch.Config{
+		RetryOnStatus: []int{502, 503, 504, 429}, // Add 429 to the list of retryable statuses
+		RetryBackoff:  func(i int) time.Duration { return time.Duration(i) * 100 * time.Millisecond },
+		MaxRetries:    5,
+	})
+	if err != nil {
+		log.Fatalf("Error: go-elasticsearch: %s", err)
+	}
+
+	indexer, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
+		Index:      indexName,
+		Client:     es,
+		NumWorkers: numWorkers,
+		FlushBytes: int(flushBytes),
+	})
+	if err != nil {
+		log.Fatalf("ERROR: Indexer: %s", err)
+	}
+
 	for i := 1; i <= numConsumers; i++ {
 		consumers = append(consumers,
 			&consumer.Consumer{
-				BrokerURL:  brokerURL,
-				TopicName:  topicName,
-				IndexName:  indexName,
-				FlushBytes: flushBytes})
+				BrokerURL: brokerURL,
+				TopicName: topicName,
+				Indexer:   indexer})
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)

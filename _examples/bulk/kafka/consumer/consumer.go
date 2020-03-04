@@ -13,19 +13,15 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/segmentio/kafka-go"
 
-	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esutil"
 )
 
 type Consumer struct {
-	BrokerURL  string
-	TopicName  string
-	IndexName  string
-	NumWorkers int
-	FlushBytes int
+	BrokerURL string
+	TopicName string
 
+	Indexer esutil.BulkIndexer
 	reader  *kafka.Reader
-	indexer esutil.BulkIndexer
 
 	totalMessages int64
 	totalErrors   int64
@@ -33,23 +29,8 @@ type Consumer struct {
 }
 
 func (c *Consumer) Run(ctx context.Context) (err error) {
-	es, err := elasticsearch.NewClient(elasticsearch.Config{
-		RetryOnStatus: []int{502, 503, 504, 429},
-		RetryBackoff:  func(i int) time.Duration { return time.Duration(i) * 100 * time.Millisecond },
-		MaxRetries:    5,
-	})
-	if err != nil {
-		return fmt.Errorf("elasticsearch: %s", err)
-	}
-
-	c.indexer, err = esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
-		Index:      c.IndexName,
-		Client:     es,
-		NumWorkers: c.NumWorkers,
-		FlushBytes: int(c.FlushBytes),
-	})
-	if err != nil {
-		return fmt.Errorf("indexer: %s", err)
+	if c.Indexer == nil {
+		panic(fmt.Sprintf("%T.Indexer is nil", c))
 	}
 
 	c.reader = kafka.NewReader(kafka.ReaderConfig{
@@ -69,7 +50,7 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 		}
 		// log.Printf("%v/%v/%v:%s\n", msg.Topic, msg.Partition, msg.Offset, string(msg.Value))
 
-		if err := c.indexer.Add(
+		if err := c.Indexer.Add(
 			context.Background(),
 			esutil.BulkIndexerItem{
 				Action: "index",
@@ -89,17 +70,17 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 		}
 	}
 	c.reader.Close()
-	c.indexer.Close(context.Background())
+	c.Indexer.Close(context.Background())
 
 	return nil
 }
 
 func (c *Consumer) Report() {
-	if c.reader == nil || c.indexer == nil {
+	if c.reader == nil || c.Indexer == nil {
 		return
 	}
 	readerStats := c.reader.Stats()
-	indexerStats := c.indexer.Stats()
+	indexerStats := c.Indexer.Stats()
 
 	c.totalMessages += readerStats.Messages
 	c.totalErrors += readerStats.Errors

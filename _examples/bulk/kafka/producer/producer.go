@@ -114,7 +114,7 @@ func (p *Producer) Stats() Stats {
 	p.totalErrors += writerStats.Errors
 	p.totalBytes += writerStats.Bytes
 
-	rate := float64(p.totalMessages) / duration.Truncate(time.Second).Seconds()
+	rate := float64(p.totalMessages) / duration.Seconds()
 
 	return Stats{
 		Duration:      duration,

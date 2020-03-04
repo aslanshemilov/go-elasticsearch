@@ -22,6 +22,7 @@ type Consumer struct {
 	Indexer esutil.BulkIndexer
 	reader  *kafka.Reader
 
+	startTime     time.Time
 	totalMessages int64
 	totalErrors   int64
 	totalBytes    int64
@@ -31,6 +32,7 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 	if c.Indexer == nil {
 		panic(fmt.Sprintf("%T.Indexer is nil", c))
 	}
+	c.startTime = time.Now()
 
 	c.reader = kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{c.BrokerURL},
@@ -75,10 +77,12 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 }
 
 type Stats struct {
+	Duration      time.Duration
 	TotalLag      int64
 	TotalMessages int64
 	TotalErrors   int64
 	TotalBytes    int64
+	Throughput    float64
 }
 
 func (c *Consumer) Stats() Stats {
@@ -86,15 +90,21 @@ func (c *Consumer) Stats() Stats {
 		return Stats{}
 	}
 
+	duration := time.Since(c.startTime)
 	readerStats := c.reader.Stats()
-	// indexerStats := c.Indexer.Stats()
 
 	c.totalMessages += readerStats.Messages
 	c.totalErrors += readerStats.Errors
+	c.totalBytes += readerStats.Bytes
+
+	rate := float64(c.totalMessages) / duration.Seconds()
 
 	return Stats{
+		Duration:      duration,
 		TotalLag:      readerStats.Lag,
 		TotalMessages: c.totalMessages,
 		TotalErrors:   c.totalErrors,
+		TotalBytes:    c.totalBytes,
+		Throughput:    rate,
 	}
 }

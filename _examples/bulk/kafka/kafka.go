@@ -12,8 +12,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/dustin/go-humanize"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esutil"
@@ -52,6 +55,7 @@ func main() {
 
 		producers []*producer.Producer
 		consumers []*consumer.Consumer
+		indexers  []esutil.BulkIndexer
 	)
 
 	done := make(chan os.Signal)
@@ -71,25 +75,26 @@ func main() {
 		MaxRetries:    5,
 	})
 	if err != nil {
-		log.Fatalf("Error: go-elasticsearch: %s", err)
+		log.Fatalf("Error: NewClient(): %s", err)
 	}
 
-	indexer, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
+	idx, err := esutil.NewBulkIndexer(esutil.BulkIndexerConfig{
 		Index:      indexName,
 		Client:     es,
 		NumWorkers: numWorkers,
 		FlushBytes: int(flushBytes),
 	})
 	if err != nil {
-		log.Fatalf("ERROR: Indexer: %s", err)
+		log.Fatalf("ERROR: NewBulkIndexer(): %s", err)
 	}
+	indexers = append(indexers, idx)
 
 	for i := 1; i <= numConsumers; i++ {
 		consumers = append(consumers,
 			&consumer.Consumer{
 				BrokerURL: brokerURL,
 				TopicName: topicName,
-				Indexer:   indexer})
+				Indexer:   indexers[0]})
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -99,16 +104,15 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Print("\033[2J\033[K")
-				fmt.Print("\033[0;0H")
-				for i, p := range producers {
-					fmt.Printf("\033[%d;0H [Producer %d]   ", i, i+1)
-					p.Report()
-				}
-				for i, c := range consumers {
-					fmt.Printf("\033[%d;0H [Consumer %d]   ", len(producers)+i+1, i+1)
-					c.Report()
-				}
+				// for i, p := range producers {
+				// 	fmt.Printf("\033[%d;0H [Producer %d]   ", i, i+1)
+				// 	p.Report()
+				// }
+				// for i, c := range consumers {
+				// 	fmt.Printf("\033[%d;0H [Consumer %d]   ", len(producers)+i+1, i+1)
+				// 	c.Report()
+				// }
+				fmt.Print(report(producers, consumers, indexers))
 			}
 		}
 	}()
@@ -140,12 +144,50 @@ func main() {
 
 	wg.Wait()
 
+	fmt.Print(report(producers, consumers, indexers))
+}
+
+func report(
+	producers []*producer.Producer,
+	consumers []*consumer.Consumer,
+	indexers []esutil.BulkIndexer,
+) string {
+	var b strings.Builder
+
+	fmt.Print("\033[2J\033[K")
+	fmt.Print("\033[0;0H")
+
 	for i, p := range producers {
-		fmt.Printf("[Producer %d]   ", i+1)
-		p.Report()
+		fmt.Fprintf(&b, "\033[%d;0H [Producer %d]   ", i+1, i+1)
+		s := p.Stats()
+		fmt.Fprintf(&b,
+			"duration=%-*s |   msg/sec=%-*s  |   sent=%-*s    |   bytes=%-*s |   errors=%-*s",
+			10, s.Duration.Truncate(time.Second),
+			10, humanize.FtoaWithDigits(s.Throughput, 0),
+			10, humanize.Comma(int64(s.TotalMessages)),
+			10, humanize.Bytes(uint64(s.TotalBytes)),
+			10, humanize.Comma(int64(s.TotalErrors)))
 	}
+
 	for i, c := range consumers {
-		fmt.Printf("[Consumer %d]   ", i+1)
-		c.Report()
+		fmt.Fprintf(&b, "\033[%d;0H [Consumer %d]   ", len(producers)+i+1, i+1)
+		s := c.Stats()
+		fmt.Fprintf(&b,
+			"lagging=%-*s  |   received=%-*s |   errors=%-*s",
+			10, humanize.Comma(s.TotalLag),
+			10, humanize.Comma(s.TotalMessages),
+			10, humanize.Comma(s.TotalErrors))
 	}
+
+	for i, x := range indexers {
+		fmt.Fprintf(&b, "\033[%d;0H [Indexer  %d]   ", len(producers)+len(consumers)+i+1, i+1)
+		s := x.Stats()
+		fmt.Fprintf(&b,
+			"added=%-*s    |   flushed=%-*s  |   failed=%-*s",
+			10, humanize.Comma(int64(s.NumAdded)),
+			10, humanize.Comma(int64(s.NumFlushed)),
+			0, humanize.Comma(int64(s.NumFailed)))
+	}
+
+	return b.String()
 }

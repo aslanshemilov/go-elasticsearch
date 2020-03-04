@@ -12,7 +12,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -95,30 +94,33 @@ func (p *Producer) CreateTopic(ctx context.Context) error {
 		})
 }
 
-func (p *Producer) Report() {
+type Stats struct {
+	Duration      time.Duration
+	TotalMessages int64
+	TotalErrors   int64
+	TotalBytes    int64
+	Throughput    float64
+}
+
+func (p *Producer) Stats() Stats {
 	if p.writer == nil {
-		return
+		return Stats{}
 	}
 
 	duration := time.Since(p.startTime)
+	writerStats := p.writer.Stats()
 
-	stats := p.writer.Stats()
-	p.totalMessages += stats.Messages
-	p.totalErrors += stats.Errors
-	p.totalBytes += stats.Bytes
+	p.totalMessages += writerStats.Messages
+	p.totalErrors += writerStats.Errors
+	p.totalBytes += writerStats.Bytes
 
-	var rate string
-	if p.totalMessages > 0 {
-		rate = humanize.FtoaWithDigits(float64(p.totalMessages)/duration.Truncate(time.Second).Seconds(), 0) + "/sec"
-	} else {
-		rate = "0/sec"
+	rate := float64(p.totalMessages) / duration.Truncate(time.Second).Seconds()
+
+	return Stats{
+		Duration:      duration,
+		TotalMessages: p.totalMessages,
+		TotalErrors:   p.totalErrors,
+		TotalBytes:    p.totalBytes,
+		Throughput:    rate,
 	}
-
-	fmt.Printf(
-		"duration=%-*s |   rate=%-*s     |   sent=%-*s    |   bytes=%-*s |   errors=%-*s",
-		10, duration.Truncate(time.Second),
-		10, rate,
-		10, humanize.Comma(int64(p.totalMessages)),
-		10, humanize.Bytes(uint64(p.totalBytes)),
-		10, humanize.Comma(int64(p.totalErrors)))
 }

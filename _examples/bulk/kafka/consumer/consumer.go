@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/segmentio/kafka-go"
 
 	"github.com/elastic/go-elasticsearch/v8/esutil"
@@ -75,22 +74,27 @@ func (c *Consumer) Run(ctx context.Context) (err error) {
 	return nil
 }
 
-func (c *Consumer) Report() {
+type Stats struct {
+	TotalLag      int64
+	TotalMessages int64
+	TotalErrors   int64
+	TotalBytes    int64
+}
+
+func (c *Consumer) Stats() Stats {
 	if c.reader == nil || c.Indexer == nil {
-		return
+		return Stats{}
 	}
+
 	readerStats := c.reader.Stats()
-	indexerStats := c.Indexer.Stats()
+	// indexerStats := c.Indexer.Stats()
 
 	c.totalMessages += readerStats.Messages
 	c.totalErrors += readerStats.Errors
 
-	fmt.Printf(
-		"lagging=%-*s  |   received=%-*s |   errors=%-*s  |   added=%-*s |   flushed=%-*s |   failed=%-*s",
-		10, humanize.Comma(readerStats.Lag),
-		10, humanize.Comma(c.totalMessages),
-		10, humanize.Comma(c.totalErrors),
-		10, humanize.Comma(int64(indexerStats.NumAdded)),
-		10, humanize.Comma(int64(indexerStats.NumFlushed)),
-		0, humanize.Comma(int64(indexerStats.NumFailed)))
+	return Stats{
+		TotalLag:      readerStats.Lag,
+		TotalMessages: c.totalMessages,
+		TotalErrors:   c.totalErrors,
+	}
 }
